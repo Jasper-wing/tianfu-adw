@@ -19,21 +19,27 @@ RADAR_FIELDS = ['TimeStamp', 'TRACKID', 'CallSign', 'RSPID',
                 'GroudSpeed', 'Height', 'Altitude',
                 'LONGITUDE', 'LATITUDE', 'Vector', 'VerticalRate']
 
-# 原始 SQL 中 XML 以字面 \n 分隔（backslash-n，非换行）
+# 原始 SQL 中 XML 以字面 \n（backslash-n）分隔；部分导出含真实换行/制表符，
+# 或额外夹带 <DataSource>/<DataType> 标签，故用统一分隔符 + 可选标签做兼容。
+_SEP = r'(?:\\n|\s)*'   # 字面 \n 或任意真实空白，可重复出现
+
 RADAR_PATTERN = re.compile(
-    r'<TimeStamp>(.*?)</TimeStamp>\\n<PositionReport>\\n'
-    r'<TRACKID>(.*?)</TRACKID>\\n'
-    r'<CallSign>(.*?)</CallSign>\\n'
-    r'<REGID></REGID>\\n'
-    r'<RSPID>(.*?)</RSPID>\\n'
-    r'<GroudSpeed>(.*?)</GroudSpeed>\\n'
-    r'<Height>(.*?)</Height>\\n'
-    r'<Altitude>(.*?)</Altitude>\\n'
-    r'<LONGITUDE>(.*?)</LONGITUDE>\\n'
-    r'<LATITUDE>(.*?)</LATITUDE>\\n'
-    r'<Vector>(.*?)</Vector>\\n'
-    r'<VerticalRate>(.*?)</VerticalRate>\\n'
-    r'</PositionReport>\\n</SData>'
+    r'<TimeStamp>(.*?)</TimeStamp>' + _SEP +
+    r'(?:<DataSource>.*?</DataSource>' + _SEP + r')?' +
+    r'(?:<DataType>.*?</DataType>' + _SEP + r')?' +
+    r'<PositionReport>' + _SEP +
+    r'<TRACKID>(.*?)</TRACKID>' + _SEP +
+    r'<CallSign>(.*?)</CallSign>' + _SEP +
+    r'<REGID>.*?</REGID>' + _SEP +
+    r'<RSPID>(.*?)</RSPID>' + _SEP +
+    r'<GroudSpeed>(.*?)</GroudSpeed>' + _SEP +
+    r'<Height>(.*?)</Height>' + _SEP +
+    r'<Altitude>(.*?)</Altitude>' + _SEP +
+    r'<LONGITUDE>(.*?)</LONGITUDE>' + _SEP +
+    r'<LATITUDE>(.*?)</LATITUDE>' + _SEP +
+    r'<Vector>(.*?)</Vector>' + _SEP +
+    r'<VerticalRate>(.*?)</VerticalRate>' + _SEP +
+    r'</PositionReport>' + _SEP + r'</SData>'
 )
 
 

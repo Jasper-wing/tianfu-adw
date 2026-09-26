@@ -58,6 +58,132 @@ def _traj3d(x, y, z, dx, dy, dz, name1='进近航空器', name2='离场航空器
     return fig
 
 
+def _arrt_for_l1(L1, p):
+    """求最接近目标避让距离 L1 (m) 的进近机避让起始时刻 arrt (s)。"""
+    best_arrt, best_dl = None, np.inf
+    for arrt in np.arange(0, 200, 1):
+        V1 = p['V0'] - p['a1'] * arrt
+        if V1 < 0:
+            continue
+        l = FAF_LEN - (p['V0'] * arrt - 0.5 * p['a1'] * arrt * arrt)
+        if abs(l - L1) < best_dl:
+            best_dl, best_arrt = abs(l - L1), arrt
+    return best_arrt
+
+
+def _adw_plan_view(direction, params, T1, alfa, l1_upper, l1_lower):
+    """ADW 俯视示意图：进近/离场航迹 + ADW 窗 + 不同避让距离的改出轨迹（x-y 平面）。"""
+    p = dict(DEFAULT_PARAMS); p.update(params)
+    x_off = DIRECTION_CONF[direction]['x_off']
+    X0, Z0 = FAF_LEN, getz(FAF_LEN)
+
+    fig = go.Figure()
+
+    # 进近标称航迹（跑道中线延长，y=0）
+    fig.add_trace(go.Scatter(
+        x=[0, FAF_LEN], y=[0, 0], mode='lines',
+        line=dict(color='#9aa7b8', width=2, dash='dot'),
+        name='RWY02/20 进近标称航迹', hoverinfo='skip'))
+
+    # 离场航迹（x=x_off 竖直向上）
+    Ldx, Ldy, _ = departure_straight_traj(
+        p['ad1'], p['Vlof'], p['ad2'], p['V2_10'], p['ad3'],
+        p['tansitaD2'], p['tansitaD3'], x_off, 180, 2)
+    fig.add_trace(go.Scatter(
+        x=Ldx, y=Ldy, mode='lines', line=dict(color='#e07b39', width=3),
+        name='RWY11 离场航迹', hoverinfo='skip'))
+
+    # 三条改出轨迹：窗内（危险）/ 下边界 / 窗外（安全）
+    for name, L1, color in [('窗内 · 危险', l1_upper, '#d62728'),
+                            ('ADW 下边界', l1_lower, '#f0a03c'),
+                            ('窗外 · 安全', l1_lower + 2500, '#2ca02c')]:
+        arrt = _arrt_for_l1(L1, p)
+        if arrt is None:
+            continue
+        Lx, Ly, _ = approach_avoidance_traj(
+            p['V0'], p['a1'], p['a2'], p['SITA1'], p['SITA2'],
+            T1, alfa, X0, Z0, arrt, arrt + 250, 1)
+        fig.add_trace(go.Scatter(
+            x=Lx, y=Ly, mode='lines', line=dict(color=color, width=3),
+            name=f'改出 L1≈{L1:.0f} m（{name}）', hoverinfo='skip'))
+
+    # ADW 窗（半透明带，沿进近航迹）
+    fig.add_shape(type='rect', x0=l1_upper, x1=l1_lower, y0=-500, y1=500,
+                  fillcolor='rgba(214,39,40,0.14)',
+                  line=dict(color='#d62728', width=1.5, dash='dot'), layer='below')
+
+    # 跑道入口竖线 + 进近方向箭头
+    fig.add_shape(type='line', x0=0, x1=0, y0=-500, y1=500,
+                  line=dict(color='#333', width=2.5), layer='below')
+
+    fig.update_layout(
+        title=f'{direction}运行 · ADW 俯视示意图（改出角 {alfa:.0f}°）',
+        xaxis_title='纵向 x (m) —— 0 为跑道入口，正值朝向 FAF',
+        yaxis_title='侧向 y (m)',
+        annotations=[
+            dict(x=0, y=-720, text='跑道入口<br>(x=0)', showarrow=False,
+                 font=dict(size=11, color='#333')),
+            dict(x=FAF_LEN, y=-720, text='FAF<br>(14155 m)', showarrow=False,
+                 font=dict(size=11, color='#1a5fa8')),
+            dict(x=0, y=-250, ax=2800, ay=-250, showarrow=True, arrowhead=3,
+                 arrowsize=1, arrowwidth=2, arrowcolor='#1a5fa8',
+                 text='进近方向', font=dict(size=11, color='#1a5fa8')),
+            dict(x=l1_upper, y=820, text=f'ADW 上边界<br>{l1_upper:.0f} m',
+                 showarrow=True, arrowhead=2, ax=0, ay=-40,
+                 font=dict(size=11, color='#d62728')),
+            dict(x=l1_lower, y=820, text=f'ADW 下边界<br>{l1_lower:.0f} m',
+                 showarrow=True, arrowhead=2, ax=0, ay=-40,
+                 font=dict(size=11, color='#d62728')),
+            dict(x=x_off, y=5600, text='RWY11 离场', showarrow=False,
+                 font=dict(size=11, color='#e07b39')),
+        ],
+        height=560,
+        xaxis=dict(range=[min(x_off, 0) - 800, FAF_LEN + 400]),
+        yaxis=dict(range=[-1100, 6000]),
+        margin=dict(l=0, r=0, t=48, b=0),
+        legend=dict(x=0.02, y=0.98, bgcolor='rgba(255,255,255,0.7)',
+                    font=dict(size=10)),
+        hovermode='closest',
+    )
+    return fig
+
+
+def _adw_stop_strip(l1_upper, l1_lower, arr_pos):
+    """纵向 ADW 停航窗：进场机在 ADW 窗内 → 离场 STOP；窗外 → GO。"""
+    inside = l1_upper <= arr_pos <= l1_lower
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=[0, FAF_LEN], y=[0, 0], mode='lines',
+        line=dict(color='#9aa7b8', width=4), hoverinfo='skip', showlegend=False))
+    fig.add_shape(type='rect', x0=l1_upper, x1=l1_lower, y0=-0.35, y1=0.35,
+                  fillcolor='rgba(214,39,40,0.20)',
+                  line=dict(color='#d62728', width=1.5, dash='dot'))
+    fig.add_shape(type='line', x0=0, x1=0, y0=-0.5, y1=0.5,
+                  line=dict(color='#333', width=3))
+    fig.add_trace(go.Scatter(
+        x=[arr_pos], y=[0], mode='markers',
+        marker=dict(symbol='diamond', size=14,
+                    color='#d62728' if inside else '#2ca02c'),
+        hoverinfo='skip', showlegend=False))
+    fig.update_layout(
+        title='ADW 停航窗（沿进近航迹）',
+        xaxis=dict(range=[min(0, l1_upper) - 500, FAF_LEN + 200],
+                   title='距跑道入口纵向距离 (m)'),
+        yaxis=dict(range=[-1, 1], visible=False),
+        annotations=[
+            dict(x=0, y=-0.75, text='跑道入口', showarrow=False,
+                 font=dict(size=11, color='#333')),
+            dict(x=l1_upper, y=0.6, text=f'上边界 {l1_upper:.0f} m',
+                 showarrow=True, arrowhead=2, ax=0, ay=-22,
+                 font=dict(size=11, color='#d62728')),
+            dict(x=l1_lower, y=0.6, text=f'下边界 {l1_lower:.0f} m',
+                 showarrow=True, arrowhead=2, ax=0, ay=-22,
+                 font=dict(size=11, color='#d62728')),
+        ],
+        height=240, margin=dict(l=0, r=0, t=44, b=0), showlegend=False)
+    return fig
+
+
 def _bundle_zip():
     """把当前已算出的全部结果打包为 zip（内含多个 Excel），供一键下载。"""
     key = 'zip_all'
@@ -218,9 +344,9 @@ with st.sidebar.expander('运动学 / 误差参数'):
 
 
 # ================= 页签 =================
-tab_risk, tab_wake, tab_traj, tab_radar, tab_ga = st.tabs(
+tab_risk, tab_wake, tab_traj, tab_radar, tab_ga, tab_adw = st.tabs(
     ['🛡️ ① 碰撞风险与 ADW', '🌪️ ② 尾流 / 改出角', '🛫 ③ 三维航迹',
-     '📡 ④ 雷达数据导入', '↩️ ⑤ 复飞（定点 vs 定高）'])
+     '📡 ④ 雷达数据导入', '↩️ ⑤ 复飞（定点 vs 定高）', '🧭 ⑥ ADW 直观示意图'])
 
 # ---------- ① 碰撞风险 ----------
 with tab_risk:
@@ -556,6 +682,59 @@ with tab_ga:
         st.plotly_chart(fig3, width='stretch')
         st.caption('说明：复飞模型为从「向北复飞.py」重构（修正其 +437、98°→95° 等笔误）；'
                    '12000 m 碰撞核下风险饱和，最小间距是更有判别力的指标。')
+
+
+# ---------- ⑥ ADW 直观示意图 ----------
+with tab_adw:
+    st.subheader('到达离场窗 ADW —— 直观示意图')
+    st.caption('依据《成都天府国际机场多跑道管制运行暨到达离场窗(ADW)专项研究报告》：'
+               '当进场（或复飞）航空器处于 ADW 窗范围内时，管制员不得向侧向跑道离场航空器发布起飞许可；'
+               '离场航空器须等待进场机离开 ADW 范围后方可起飞。')
+
+    c1, c2, c3 = st.columns(3)
+    adw_alfa = c1.slider('避让改出角 (°)', 10, 45, 35, key='adw_alfa')
+    adw_upper = c2.number_input('ADW 上边界（距跑道入口, m）', 0.0, 3000.0, 900.0,
+                                step=100.0, key='adw_upper')
+    adw_lower = c3.number_input('ADW 下边界（最小避让距离, m）', 2000.0, 12000.0, 9000.0,
+                                step=100.0, key='adw_lower')
+    st.caption('终端方案取 ADW 上边界 −900 m、下边界 9000 m；下边界即本工具遍历计算的「最小避让距离 L1」。')
+
+    if 'risk_bd' in st.session_state:
+        bd = st.session_state['risk_bd']
+        if len(bd):
+            row = bd.loc[(bd['ALFA'] - adw_alfa).abs().idxmin()]
+            val = float(row['ADW下边界_m'])
+            if np.isfinite(val):
+                st.info(f'① 页已算：改出角 {row["ALFA"]:.0f}° 的 ADW 下边界 ≈ **{val:.0f} m**'
+                        f'（可据此回填上方「下边界」对照）。')
+
+    st.plotly_chart(_adw_plan_view(direction, params, T1, adw_alfa, adw_upper, adw_lower),
+                    width='stretch')
+
+    st.markdown('---')
+    arr_pos = st.slider('进场机当前距跑道入口距离 (m)', 0, 12000, 4000, key='adw_arr_pos')
+    inside = adw_upper <= arr_pos <= adw_lower
+    if inside:
+        st.markdown(f'<div style="background:#fdecea;border:1px solid #d62728;border-radius:10px;'
+                    f'padding:14px 18px;font-size:1.05rem;color:#a31616">'
+                    f'🔴 进场机位于 ADW 窗内（{arr_pos:.0f} m）→ RWY11 离场航空器 '
+                    f'<b>STOP · 停止起飞</b>，须等待进场机离开 ADW 范围</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="background:#e9f7ef;border:1px solid #2ca02c;border-radius:10px;'
+                    f'padding:14px 18px;font-size:1.05rem;color:#1e7a3a">'
+                    f'🟢 进场机位于 ADW 窗外（{arr_pos:.0f} m）→ RWY11 离场航空器 '
+                    f'<b>GO · 可以起飞</b></div>', unsafe_allow_html=True)
+    st.plotly_chart(_adw_stop_strip(adw_upper, adw_lower, arr_pos), width='stretch')
+
+    with st.expander('ADW 划设要点（摘自专项研究报告）'):
+        st.markdown(
+            '- **规则**：进场（或复飞）航空器处于 ADW 窗范围内时，不得向侧向跑道离场航空器发布起飞许可；'
+            '离场机须等进场机离开 ADW 范围后方可起飞。\n'
+            '- **ADW 下边界**（即最小避让距离，本工具在 ① 页遍历计算）：碰撞核越大、避让改出角越大，'
+            '所需下边界越大；以航空器尺寸为碰撞核计算时，风险已满足 TLS，可不设 ADW。\n'
+            '- **ADW 上边界**：一般取复飞决断高（DH）处；更保守取跑道入口后 900 m。'
+            '验证运行后可将上边界取至跑道入口之上高 120 m（距入口约 1974 m）。')
 
 
 # ================= 一键导出（放在脚本末尾，结果更新后打包最新数据） =================
