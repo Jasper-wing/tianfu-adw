@@ -303,7 +303,7 @@ st.markdown("""
 st.markdown("""
 <div class="hero">
     <h1>成都天府国际机场 混合跑道进离场冲突避让 · ADW 动态调度 — 安全评估工具</h1>
-    <p>基于到达离场窗（ADW）的混合跑道进离场冲突避让动态调度研究　·　碰撞风险 P=Px·Py·Pz　·　紧急避让　·　复飞（定点/定高）　·　尾流　·　雷达航迹 —— 全流程演示平台</p>
+    <p>基于到达离场窗（ADW）的混合跑道进离场冲突避让动态调度方案设计　·　碰撞风险 P=Px·Py·Pz　·　紧急避让　·　复飞（定点/定高）　·　尾流　·　雷达航迹 —— 全流程演示平台</p>
     <div class="chips">
         <span class="chip">TLS = 5×10⁻⁹ 次/飞行小时</span>
         <span class="chip">ICAO 安全目标水平</span>
